@@ -1,45 +1,31 @@
 from fastapi import FastAPI, Request, HTTPException
-import os, subprocess, json
+import os
+from canvas_mcp import CanvasMCPServer
 
 app = FastAPI()
 
+# 1️⃣  Environment variables (from Render)
 API_KEY = os.environ.get("API_KEY")
+CANVAS_API_TOKEN = os.environ.get("CANVAS_API_TOKEN")
+CANVAS_API_URL = os.environ.get("CANVAS_API_URL")
+
+# 2️⃣  Initialize the real Canvas MCP server
+canvas_server = CanvasMCPServer(api_url=CANVAS_API_URL, api_token=CANVAS_API_TOKEN)
 
 @app.get("/")
 async def root():
-    # simple health-check endpoint
-    return {"message": "Canvas MCP server is alive."}
+    return {"message": "Canvas MCP is alive and registered."}
 
 @app.post("/")
-async def mcp_entrypoint(request: Request):
-    # check x-api-key header
+async def mcp_endpoint(request: Request):
+    # 3️⃣  Optional: secure with your x-api-key
     if API_KEY and request.headers.get("x-api-key") != API_KEY:
         raise HTTPException(status_code=403, detail="Forbidden: invalid API key")
 
+    # 4️⃣  Pass the request directly to the Canvas MCP handler
     try:
         data = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON.")
-
-    # basic MCP handshake
-    if data.get("method") == "ping":
-        return {"jsonrpc": "2.0", "result": "pong", "id": data.get("id")}
-    if data.get("method") == "get_tools":
-        return {
-            "jsonrpc": "2.0",
-            "result": {
-                "tools": [
-                    {"name": "canvas_query", "description": "Query your Canvas data."},
-                ]
-            },
-            "id": data.get("id"),
-        }
-
-    # default: proxy everything else to the canvas-mcp-server
-    proc = subprocess.run(
-        ["canvas-mcp-server"],
-        input=json.dumps(data),
-        text=True,
-        capture_output=True,
-    )
-    return {"jsonrpc": "2.0", "result": proc.stdout, "id": data.get("id")}
+        response = await canvas_server.handle_request(data)
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
